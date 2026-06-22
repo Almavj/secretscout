@@ -1,0 +1,209 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Organization {
+  id             String           @id @default(cuid())
+  name           String
+  slug           String           @unique
+  plan           String           @default("team")
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  members        OrgMember[]
+  scopeEntries   ScopeEntry[]
+  scans          Scan[]
+  findings       Finding[]
+  integrations   Integration[]
+  sourceProviders SourceProvider[]
+  detectionRules DetectionRule[]
+}
+
+model OrgMember {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  role           String   @default("viewer")
+  createdAt      DateTime @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id])
+  @@unique([organizationId, userId])
+}
+
+model ScopeEntry {
+  id             String   @id @default(cuid())
+  organizationId String
+  targetType     String
+  targetValue    String
+  accessLevel    String   @default("write")
+  enabled        Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model SourceProvider {
+  id             String         @id @default(cuid())
+  organizationId String
+  type           String
+  name           String
+  enabled        Boolean        @default(true)
+  config         String         @default("{}")
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  tokenPools     TokenPool[]
+  dorkTemplates  DorkTemplate[]
+  scans          Scan[]
+}
+
+model TokenPool {
+  id                String    @id @default(cuid())
+  providerId        String
+  label             String
+  tokenType         String
+  tokenValue        String
+  rateLimitRemaining Int      @default(30)
+  rateLimitResetAt  DateTime?
+  lastUsedAt        DateTime?
+  enabled           Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+  provider          SourceProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+}
+
+model DorkTemplate {
+  id             String   @id @default(cuid())
+  providerId     String
+  name           String
+  description    String   @default("")
+  queryTemplate  String
+  category       String   @default("general")
+  severity       String   @default("high")
+  enabled        Boolean  @default(true)
+  isBuiltin      Boolean  @default(false)
+  scheduleCron   String   @default("0 */6 * * *")
+  lastRunAt      DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  provider       SourceProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  scans          Scan[]
+}
+
+model DetectionRule {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  description    String   @default("")
+  pattern        String
+  secretGroup    Int      @default(1)
+  category       String
+  severity       String   @default("high")
+  isBuiltin      Boolean  @default(false)
+  isAstAware     Boolean  @default(false)
+  isDiffAware    Boolean  @default(true)
+  enabled        Boolean  @default(true)
+  tomlConfig     String   @default("")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  findings       Finding[]
+}
+
+model Scan {
+  id             String   @id @default(cuid())
+  organizationId String
+  providerId     String?
+  dorkTemplateId String?
+  status         String   @default("queued")
+  scanType       String
+  scopeMode      String   @default("restricted")
+  startedAt      DateTime?
+  completedAt    DateTime?
+  errorMessage   String?
+  statsTotal     Int      @default(0)
+  statsNew       Int      @default(0)
+  statsDuplicate Int      @default(0)
+  createdAt      DateTime @default(now())
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  provider       SourceProvider? @relation(fields: [providerId], references: [id])
+  dorkTemplate   DorkTemplate?   @relation(fields: [dorkTemplateId], references: [id])
+  findings       Finding[]
+}
+
+model Finding {
+  id               String        @id @default(cuid())
+  organizationId   String
+  scanId           String
+  ruleId           String?
+  dedupHash        String        @unique
+  secretType       String
+  matchedPattern   String
+  matchedValue     String
+  fileUrl          String
+  filePath         String
+  repoName         String
+  repoUrl          String
+  commitHash       String
+  commitUrl        String
+  commitMessage    String
+  commitAuthor     String
+  commitDate       DateTime
+  branch           String        @default("main")
+  lineNumber       Int?
+  severity         String        @default("high")
+  isVerified       Boolean       @default(false)
+  verificationNote String        @default("")
+  verifiedAt       DateTime?
+  isAstFiltered    Boolean       @default(false)
+  isStillPresent   Boolean       @default(true)
+  isForkMatch      Boolean       @default(false)
+  upstreamRepo     String?
+  status           String        @default("open")
+  assignedTo       String?
+  remediatedAt     DateTime?
+  mttrHours        Float?
+  remediationNote  String        @default("")
+  artifactPath     String?
+  discoveredAt     DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  organization     Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  scan             Scan           @relation(fields: [scanId], references: [id], onDelete: Cascade)
+  rule             DetectionRule? @relation(fields: [ruleId], references: [id])
+  events           FindingEvent[]
+}
+
+model FindingEvent {
+  id        String   @id @default(cuid())
+  findingId String
+  eventType String
+  actor     String
+  note      String   @default("")
+  createdAt DateTime @default(now())
+  finding   Finding  @relation(fields: [findingId], references: [id], onDelete: Cascade)
+}
+
+model Integration {
+  id             String   @id @default(cuid())
+  organizationId String
+  type           String
+  name           String
+  enabled        Boolean  @default(true)
+  config         String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id            String     @id @default(cuid())
+  email         String     @unique
+  name          String?
+  avatarUrl     String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  organizations OrgMember[]
+}

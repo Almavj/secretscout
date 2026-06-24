@@ -17,6 +17,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { useAppStore } from '@/lib/store';
+import { apiFetch } from '@/lib/api';
 import type { Finding, LiveFinding } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
@@ -127,7 +128,7 @@ export function FeedView() {
 
   const { data: findings, isLoading } = useQuery<Finding[]>({
     queryKey: ['findings'],
-    queryFn: () => fetch('/api/findings').then(r => r.json()),
+    queryFn: () => apiFetch('/api/findings'),
   });
 
   // WebSocket connection
@@ -150,9 +151,9 @@ export function FeedView() {
   }, [addLiveFinding, setWsConnected]);
 
   // Finding detail query
-  const { data: selectedFinding } = useQuery({
+  const { data: selectedFinding } = useQuery<Finding & { events?: Finding['events'] }>({
     queryKey: ['finding', selectedFindingId],
-    queryFn: () => fetch(`/api/finding/${selectedFindingId}`).then(r => r.json()),
+    queryFn: () => apiFetch(`/api/finding/${selectedFindingId}`),
     enabled: !!selectedFindingId,
   });
 
@@ -354,7 +355,7 @@ export function FeedView() {
               <div>
                 <label className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Event Timeline</label>
                 <div className="mt-2 space-y-2">
-                  {selectedFinding.events.map((ev, i) => (
+                  {selectedFinding.events.map((ev) => (
                     <div key={ev.id} className="flex gap-2 text-xs">
                       <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 shrink-0" />
                       <div>

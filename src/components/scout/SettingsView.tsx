@@ -1,15 +1,26 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Shield, AlertTriangle, Github, Gitlab, GitBranch, Key,
-  Lock, Eye
+  Lock, Eye, Plus, Trash2, X
 } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
+import { apiFetch } from '@/lib/api';
 import type { ScopeEntry, TokenPool } from '@/lib/types';
+import { toast } from 'sonner';
 
 const TARGET_ICONS: Record<string, React.ElementType> = {
   github_org: Github,
@@ -28,8 +39,70 @@ const TARGET_LABELS: Record<string, string> = {
 };
 
 export function SettingsView() {
-  const { data: scopeEntries, isLoading: sl } = useQuery<ScopeEntry[]>({ queryKey: ['scope'], queryFn: () => fetch('/api/scope').then(r => r.json()) });
-  const { data: tokens, isLoading: tl } = useQuery<TokenPool[]>({ queryKey: ['tokens'], queryFn: () => fetch('/api/tokens').then(r => r.json()) });
+  const queryClient = useQueryClient();
+  const [tokenDialogOpen, setTokenDialogOpen] = useState(false);
+  const [scopeDialogOpen, setScopeDialogOpen] = useState(false);
+  const [tokenLabel, setTokenLabel] = useState('');
+  const [tokenValue, setTokenValue] = useState('');
+  const [scopeType, setScopeType] = useState('github_org');
+  const [scopeValue, setScopeValue] = useState('');
+
+  const { data: scopeEntries } = useQuery<ScopeEntry[]>({
+    queryKey: ['scope'],
+    queryFn: () => apiFetch('/api/scope'),
+  });
+
+  const { data: tokens } = useQuery<TokenPool[]>({
+    queryKey: ['tokens'],
+    queryFn: () => apiFetch('/api/tokens'),
+  });
+
+  const addToken = useMutation({
+    mutationFn: () => apiFetch('/api/tokens', {
+      method: 'POST',
+      body: JSON.stringify({ label: tokenLabel, token: tokenValue, tokenType: 'pat' }),
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tokens'] });
+      setTokenDialogOpen(false);
+      setTokenLabel('');
+      setTokenValue('');
+      toast.success('Token added successfully');
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const deleteToken = useMutation({
+    mutationFn: (id: string) => apiFetch(`/api/tokens?id=${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tokens'] });
+      toast.success('Token deleted');
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const addScope = useMutation({
+    mutationFn: () => apiFetch('/api/scope', {
+      method: 'POST',
+      body: JSON.stringify({ targetType: scopeType, targetValue: scopeValue }),
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['scope'] });
+      setScopeDialogOpen(false);
+      setScopeValue('');
+      toast.success('Scope entry added');
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const deleteScope = useMutation({
+    mutationFn: (id: string) => apiFetch(`/api/scope?id=${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['scope'] });
+      toast.success('Scope entry deleted');
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
 
   return (
     <div className="space-y-6">
@@ -38,20 +111,7 @@ export function SettingsView() {
         <p className="text-sm text-muted-foreground mt-1">Scope restrictions and token pool management.</p>
       </div>
 
-      {/* =====================================================================
-          HARD BOUNDARY: SCOPE RESTRICTION
-          This is the most critical security control in the platform.
-
-          DEFAULT BEHAVIOR:
-          - Discovery layer ONLY scans repos/orgs explicitly listed in the scope allowlist below.
-          - Scans default to scopeMode="restricted".
-
-          The "public_discovery" / "scan all of public GitHub" module is:
-          - A SEPARATE, CLEARLY-LABELED module
-          - OPT-IN only (never enabled by default)
-          - Intended for your own org's exposure monitoring or authorized bug bounty scope
-          - NOT generalized internet-wide credential harvesting
-          ===================================================================== */}
+      {/* Scope Restriction Warning */}
       <Card className="border-[oklch(0.65_0.25_25)]/40 glow-critical">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-medium flex items-center gap-2 text-[oklch(0.80_0.20_25)]">
@@ -62,20 +122,12 @@ export function SettingsView() {
           <div className="flex items-start gap-3 p-3 bg-[oklch(0.65_0.25_25)]/10 rounded-lg border border-[oklch(0.65_0.25_25)]/20">
             <AlertTriangle className="w-5 h-5 text-[oklch(0.65_0.25_25)] shrink-0 mt-0.5" />
             <div className="text-xs space-y-1.5">
-              <p className="font-medium text-[oklch(0.80_0.20_25)]">This control is baked into the design, not bolted on later.</p>
+              <p className="font-medium text-[oklch(0.80_0.20_25)]">This control is baked into the design.</p>
               <p className="text-muted-foreground">
-                The discovery layer <strong className="text-foreground">defaults to scope-restricted mode</strong>: scanning only repos under orgs/users the authenticated account has explicit write/admin access to, or repos explicitly added via the allowlist below.
-              </p>
-              <p className="text-muted-foreground">
-                The <strong className="text-foreground">"scan all of public GitHub"</strong> dork-based discovery is a separate, clearly-labeled module that is <strong className="text-[oklch(0.85_0.15_55)]">opt-in only</strong> — intended for your own org&apos;s exposure monitoring or authorized bug bounty scope — not generalized internet-wide credential harvesting.
-              </p>
-              <p className="text-muted-foreground">
-                This line is what separates a credential scanner from unauthorized access tooling under most computer misuse statutes, including Kenya&apos;s Computer Misuse and Cybercrimes Act.
+                The discovery layer <strong className="text-foreground">defaults to scope-restricted mode</strong>: scanning only repos under orgs/users in the allowlist below.
               </p>
             </div>
           </div>
-
-          {/* Scope Mode Indicator */}
           <div className="flex items-center gap-4 p-3 bg-muted/30 rounded-lg">
             <div className="flex items-center gap-2">
               <Lock className="w-4 h-4 text-primary" />
@@ -88,10 +140,15 @@ export function SettingsView() {
 
       {/* Scope Allowlist */}
       <div>
-        <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-          <Eye className="w-4 h-4 text-primary" /> Scope Allowlist
-          <Badge variant="outline" className="text-[10px]">{scopeEntries?.length || 0} entries</Badge>
-        </h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <Eye className="w-4 h-4 text-primary" /> Scope Allowlist
+            <Badge variant="outline" className="text-[10px]">{scopeEntries?.length || 0} entries</Badge>
+          </h3>
+          <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => setScopeDialogOpen(true)}>
+            <Plus className="w-3 h-3 mr-1" /> Add Scope
+          </Button>
+        </div>
         <Card>
           <CardContent className="p-0">
             <ScrollArea className="max-h-[300px]">
@@ -102,6 +159,7 @@ export function SettingsView() {
                     <th className="p-3 font-medium">Target</th>
                     <th className="p-3 font-medium">Required Access</th>
                     <th className="p-3 font-medium">Status</th>
+                    <th className="p-3 font-medium w-[60px]"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -124,9 +182,26 @@ export function SettingsView() {
                         <td className="p-3">
                           <Badge variant="outline" className="text-[10px] h-5 border-primary/40 text-primary">Enabled</Badge>
                         </td>
+                        <td className="p-3">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => deleteScope.mutate(entry.id)}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </td>
                       </tr>
                     );
                   })}
+                  {(!scopeEntries || scopeEntries.length === 0) && (
+                    <tr>
+                      <td colSpan={5} className="p-6 text-center text-muted-foreground">
+                        No scope entries configured. Click &quot;Add Scope&quot; to get started.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </ScrollArea>
@@ -138,12 +213,17 @@ export function SettingsView() {
 
       {/* Token Pool Management */}
       <div>
-        <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-          <Key className="w-4 h-4 text-primary" /> Token Pool (Rotating Auth)
-          <Badge variant="outline" className="text-[10px]">Rotates to avoid 30 req/min rate limit</Badge>
-        </h3>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold flex items-center gap-2">
+            <Key className="w-4 h-4 text-primary" /> Token Pool (Rotating Auth)
+            <Badge variant="outline" className="text-[10px]">Rotates to avoid 30 req/min rate limit</Badge>
+          </h3>
+          <Button size="sm" variant="outline" className="text-xs h-7" onClick={() => setTokenDialogOpen(true)}>
+            <Plus className="w-3 h-3 mr-1" /> Add Token
+          </Button>
+        </div>
         <p className="text-xs text-muted-foreground mb-3">
-          A pool of 5-10 GitHub Apps/PATs rotate to distribute API load and avoid the secondary rate limit. Tokens are used round-robin, skipping those with exhausted rate limits.
+          A pool of GitHub PATs rotate to distribute API load and avoid the secondary rate limit.
         </p>
         <Card>
           <CardContent className="p-0">
@@ -156,6 +236,7 @@ export function SettingsView() {
                     <th className="p-3 font-medium">Type</th>
                     <th className="p-3 font-medium">Rate Limit</th>
                     <th className="p-3 font-medium">Last Used</th>
+                    <th className="p-3 font-medium w-[60px]"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -189,15 +270,126 @@ export function SettingsView() {
                         <td className="p-3 text-muted-foreground text-[10px]">
                           {token.lastUsedAt ? new Date(token.lastUsedAt).toLocaleString() : 'Never'}
                         </td>
+                        <td className="p-3">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => deleteToken.mutate(token.id)}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </td>
                       </tr>
                     );
                   })}
+                  {(!tokens || tokens.length === 0) && (
+                    <tr>
+                      <td colSpan={6} className="p-6 text-center text-muted-foreground">
+                        No tokens configured. Click &quot;Add Token&quot; to add a GitHub PAT.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </ScrollArea>
           </CardContent>
         </Card>
       </div>
+
+      {/* Add Token Dialog */}
+      <Dialog open={tokenDialogOpen} onOpenChange={setTokenDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Key className="w-4 h-4" /> Add GitHub Token
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <label className="text-xs font-medium mb-1.5 block">Label</label>
+              <Input
+                placeholder="e.g. Bot Account 1"
+                value={tokenLabel}
+                onChange={e => setTokenLabel(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium mb-1.5 block">Personal Access Token</label>
+              <Input
+                placeholder="ghp_xxxxxxxxxxxx"
+                type="password"
+                value={tokenValue}
+                onChange={e => setTokenValue(e.target.value)}
+              />
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Requires repo scope. Token is validated against GitHub API before saving.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setTokenDialogOpen(false)}>
+              <X className="w-3 h-3 mr-1" /> Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={!tokenLabel || !tokenValue || addToken.isPending}
+              onClick={() => addToken.mutate()}
+            >
+              {addToken.isPending ? 'Validating...' : 'Add Token'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Scope Dialog */}
+      <Dialog open={scopeDialogOpen} onOpenChange={setScopeDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="w-4 h-4" /> Add Scope Entry
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <label className="text-xs font-medium mb-1.5 block">Type</label>
+              <Select value={scopeType} onValueChange={setScopeType}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="github_org">GitHub Organization</SelectItem>
+                  <SelectItem value="github_user">GitHub User</SelectItem>
+                  <SelectItem value="repo_allowlist">Repository (Allowlist)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-xs font-medium mb-1.5 block">Target Value</label>
+              <Input
+                placeholder={scopeType === 'repo_allowlist' ? 'org/repo-name' : 'org-or-username'}
+                value={scopeValue}
+                onChange={e => setScopeValue(e.target.value)}
+              />
+              <p className="text-[10px] text-muted-foreground mt-1">
+                {scopeType === 'repo_allowlist'
+                  ? 'Format: owner/repo (e.g. myorg/myrepo)'
+                  : 'Enter the GitHub organization or user name'}
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setScopeDialogOpen(false)}>
+              <X className="w-3 h-3 mr-1" /> Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={!scopeValue || addScope.isPending}
+              onClick={() => addScope.mutate()}
+            >
+              {addScope.isPending ? 'Adding...' : 'Add Scope'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

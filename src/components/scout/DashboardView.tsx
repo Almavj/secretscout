@@ -3,7 +3,7 @@
 import { useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle, ShieldAlert, CheckCircle2, Clock, Activity, GitFork,
-  Brain, Eye, Settings, Telescope, BarChart3
+  Brain, Settings, Telescope, BarChart3, Download
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -15,19 +15,13 @@ import {
 } from 'recharts';
 import type { DashboardStats } from '@/lib/types';
 import { useAppStore } from '@/lib/store';
+import { apiFetch } from '@/lib/api';
 
 const SEVERITY_COLORS: Record<string, string> = {
   critical: 'oklch(0.65 0.25 25)',
   high: 'oklch(0.75 0.18 55)',
   medium: 'oklch(0.65 0.20 280)',
   low: 'oklch(0.55 0.08 260)',
-};
-
-const SEVERITY_BG: Record<string, string> = {
-  critical: 'bg-[oklch(0.65_0.25_25)]/15 text-[oklch(0.75_0.22_25)] border-[oklch(0.65_0.25_25)]/30',
-  high: 'bg-[oklch(0.75_0.18_55)]/15 text-[oklch(0.80_0.16_55)] border-[oklch(0.75_0.18_55)]/30',
-  medium: 'bg-[oklch(0.65_0.20_280)]/15 text-[oklch(0.75_0.18_280)] border-[oklch(0.65_0.20_280)]/30',
-  low: 'bg-[oklch(0.55_0.08_260)]/15 text-[oklch(0.65_0.08_260)] border-[oklch(0.55_0.08_260)]/30',
 };
 
 const TOOLTIP_STYLE = {
@@ -40,21 +34,23 @@ export function DashboardView() {
 
   const { data: setupStatus } = useQuery<{ ready: boolean; orgName?: string }>({
     queryKey: ['setup-status'],
-    queryFn: () => fetch('/api/setup/status').then(r => r.json()),
+    queryFn: () => apiFetch('/api/setup/status'),
   });
 
   const { data, isLoading } = useQuery<DashboardStats>({
     queryKey: ['dashboard'],
-    queryFn: () => fetch('/api/dashboard').then(r => r.json()),
+    queryFn: () => apiFetch('/api/dashboard'),
     refetchInterval: 30000,
   });
 
   if (isLoading) return <DashboardSkeleton />;
 
-  const s = data!.summary;
+  if (!data || !data.summary) return <DashboardSkeleton />;
+
+  const s = data.summary;
 
   // Onboarding state: no findings, no scans
-  const isEmpty = s.totalFindings === 0 && (!data!.recentScans || data!.recentScans.length === 0);
+  const isEmpty = s.totalFindings === 0 && (!data.recentScans || data.recentScans.length === 0);
 
   if (isEmpty) {
     return (
@@ -101,19 +97,24 @@ export function DashboardView() {
     { label: 'Remediated', value: s.remediatedFindings, icon: Activity, color: 'text-primary', bg: 'bg-primary/10' },
   ];
 
-  const recentScans = data!.recentScans || [];
-  const findingsTrend = data!.findingsByDay || [];
-  const pieData = (data!.severityBreakdown || []).filter(d => d.count > 0).map(d => ({ ...d, fill: SEVERITY_COLORS[d.severity] || '#666' }));
-  const categoryData = data!.categoryBreakdown || [];
+  const recentScans = data.recentScans || [];
+  const findingsTrend = data.findingsByDay || [];
+  const pieData = (data.severityBreakdown || []).filter(d => d.count > 0).map(d => ({ ...d, fill: SEVERITY_COLORS[d.severity] || '#666' }));
+  const categoryData = data.categoryBreakdown || [];
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight">Risk Dashboard</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Organization-wide credential exposure overview
-          {setupStatus?.orgName ? <> for <span className="text-primary font-medium">{setupStatus.orgName}</span></> : null}
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Risk Dashboard</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Organization-wide credential exposure overview
+            {setupStatus?.orgName ? <> for <span className="text-primary font-medium">{setupStatus.orgName}</span></> : null}
+          </p>
+        </div>
+        <Button variant="outline" size="sm" className="text-xs" onClick={() => window.open('/api/report?format=html', '_blank')}>
+          <Download className="w-3.5 h-3.5 mr-1.5" /> Export Report
+        </Button>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

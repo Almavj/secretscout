@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ViewId, Finding, LiveFinding, Scan } from '@/lib/types';
+import type { ViewId, LiveFinding, Scan } from '@/lib/types';
 
 interface AppState {
   currentView: ViewId;

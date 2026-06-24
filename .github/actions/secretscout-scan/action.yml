@@ -1,0 +1,115 @@
+name: 'SecretScout Scan'
+description: 'Scan repository for leaked secrets using SecretScout Pro'
+
+inputs:
+  secretscout-url:
+    description: 'SecretScout Pro instance URL'
+    required: true
+  api-key:
+    description: 'SecretScout API key'
+    required: true
+  scan-mode:
+    description: 'Scan mode: current (HEAD only) or history (git log)'
+    required: false
+    default: 'current'
+  fail-on-finding:
+    description: 'Fail the action if critical/high findings are detected'
+    required: false
+    default: 'true'
+  severity-threshold:
+    description: 'Minimum severity to fail on: critical, high, medium, low'
+    required: false
+    default: 'high'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run SecretScout scan
+      shell: bash
+      run: |
+        echo "🔍 SecretScout Pro — Scanning for leaked secrets..."
+
+        RESPONSE=$(curl -s -w "\n%{http_code}" \
+          -X POST "${{ inputs.secretscout-url }}/api/scan/trigger" \
+          -H "Authorization: Bearer ${{ inputs.api-key }}" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"scanType\": \"github_action\",
+            \"scopeMode\": \"restricted\",
+            \"customQuery\": \"${{ github.repository }}\"
+          }")
+
+        HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+        BODY=$(echo "$RESPONSE" | head -n -1)
+
+        if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "202" ]; then
+          echo "❌ Scan trigger failed (HTTP $HTTP_CODE)"
+          echo "$BODY"
+          exit 1
+        fi
+
+        SCAN_ID=$(echo "$BODY" | grep -o '"scanId":"[^"]*"' | cut -d'"' -f4)
+        echo "✅ Scan triggered: $SCAN_ID"
+
+        echo "⏳ Waiting for scan to complete..."
+        MAX_WAIT=300
+        ELAPSED=0
+        while [ $ELAPSED -lt $MAX_WAIT ]; do
+          sleep 10
+          ELAPSED=$((ELAPSED + 10))
+
+          STATUS_RESPONSE=$(curl -s \
+            -H "Authorization: Bearer ${{ inputs.api-key }}" \
+            "${{ inputs.secretscout-url }}/api/scans")
+
+          SCAN_STATUS=$(echo "$STATUS_RESPONSE" | grep -o "\"id\":\"$SCAN_ID\"[^}]*\"status\":\"[^\"]*\"" | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
+
+          if [ "$SCAN_STATUS" = "completed" ]; then
+            echo "✅ Scan completed"
+            break
+          elif [ "$SCAN_STATUS" = "failed" ]; then
+            echo "❌ Scan failed"
+            exit 1
+          fi
+
+          echo "  Still running... (${ELAPSED}s elapsed)"
+        done
+
+        if [ $ELAPSED -ge $MAX_WAIT ]; then
+          echo "⏰ Scan timed out after ${MAX_WAIT}s"
+          exit 1
+        fi
+
+        FINDINGS_RESPONSE=$(curl -s \
+          -H "Authorization: Bearer ${{ inputs.api-key }}" \
+          "${{ inputs.secretscout-url }}/api/findings")
+
+        CRITICAL_COUNT=$(echo "$FINDINGS_RESPONSE" | grep -o '"severity":"critical"' | wc -l)
+        HIGH_COUNT=$(echo "$FINDINGS_RESPONSE" | grep -o '"severity":"high"' | wc -l)
+        MEDIUM_COUNT=$(echo "$FINDINGS_RESPONSE" | grep -o '"severity":"medium"' | wc -l)
+
+        echo ""
+        echo "📊 Scan Results:"
+        echo "  Critical: $CRITICAL_COUNT"
+        echo "  High: $HIGH_COUNT"
+        echo "  Medium: $MEDIUM_COUNT"
+
+        if [ "${{ inputs.fail-on-finding }}" = "true" ]; then
+          THRESHOLD="${{ inputs.severity-threshold }}"
+          if [ "$THRESHOLD" = "critical" ] && [ $CRITICAL_COUNT -gt 0 ]; then
+            echo ""
+            echo "❌ FAILED: $CRITICAL_COUNT critical severity findings detected"
+            exit 1
+          elif [ "$THRESHOLD" = "high" ] && [ $((CRITICAL_COUNT + HIGH_COUNT)) -gt 0 ]; then
+            echo ""
+            echo "❌ FAILED: $((CRITICAL_COUNT + HIGH_COUNT)) critical/high findings detected"
+            exit 1
+          elif [ "$THRESHOLD" = "medium" ] && [ $((CRITICAL_COUNT + HIGH_COUNT + MEDIUM_COUNT)) -gt 0 ]; then
+            echo ""
+            echo "❌ FAILED: $((CRITICAL_COUNT + HIGH_COUNT + MEDIUM_COUNT)) findings at medium+ severity detected"
+            exit 1
+          fi
+        fi
+
+        echo ""
+        echo "✅ No findings above threshold — scan passed"

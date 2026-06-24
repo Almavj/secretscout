@@ -1,5 +1,5 @@
 import { db } from '@/lib/db';
-import { NextResponse } from 'next/server';
+import { successResponse, errorResponse } from '@/lib/api-helpers';
 
 export async function GET(
   _request: Request,
@@ -11,14 +11,19 @@ export async function GET(
       where: { id },
       include: {
         rule: true,
-        scan: { include: { provider: { select: { name: true, type: true } }, dorkTemplate: { select: { name: true } } } },
+        scan: {
+          include: {
+            provider: { select: { name: true, type: true } },
+            dorkTemplate: { select: { name: true } },
+          },
+        },
         events: { orderBy: { createdAt: 'asc' } },
       },
     });
 
-    if (!finding) return NextResponse.json({ error: 'Finding not found' }, { status: 404 });
-    return NextResponse.json(finding);
+    if (!finding) return errorResponse('Finding not found', 'NOT_FOUND', 404);
+    return successResponse(finding);
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    return errorResponse(String(e), 'FINDING_ERROR', 500);
   }
 }

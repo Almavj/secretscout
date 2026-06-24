@@ -1,15 +1,24 @@
 'use client';
 
-import React from 'react';
-import { useQuery } from '@tanstack/react-query';
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Github, Gitlab, RefreshCw, Play, CheckCircle2, XCircle, Clock,
-  AlertCircle, Loader2, FileSearch, GitFork, Database, Radio
+  AlertCircle, Loader2, FileSearch, GitFork, Database, Radio, Zap
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
+import { apiFetch } from '@/lib/api';
+import { toast } from 'sonner';
 import type { SourceProvider, Scan, DorkTemplate } from '@/lib/types';
 
 const PROVIDER_ICONS: Record<string, React.ElementType> = {
@@ -44,22 +53,46 @@ function timeAgo(d: string | null): string {
 }
 
 export function DiscoveryView() {
-  const { data: providers, isLoading: pl } = useQuery<SourceProvider[]>({ queryKey: ['providers'], queryFn: () => fetch('/api/providers').then(r => r.json()) });
-  const { data: scans, isLoading: sl } = useQuery<Scan[]>({ queryKey: ['scans'], queryFn: () => fetch('/api/scans').then(r => r.json()) });
-  const { data: dorks, isLoading: dl } = useQuery<DorkTemplate[]>({ queryKey: ['dorks'], queryFn: () => fetch('/api/dorks').then(r => r.json()) });
+  const queryClient = useQueryClient();
+  const [scanDialogOpen, setScanDialogOpen] = useState(false);
+  const [customQuery, setCustomQuery] = useState('');
+  const [useCustomQuery, setUseCustomQuery] = useState(false);
+
+  const { data: providers } = useQuery<SourceProvider[]>({ queryKey: ['providers'], queryFn: () => apiFetch('/api/providers') });
+  const { data: scans } = useQuery<Scan[]>({ queryKey: ['scans'], queryFn: () => apiFetch('/api/scans') });
+  const { data: dorks } = useQuery<DorkTemplate[]>({ queryKey: ['dorks'], queryFn: () => apiFetch('/api/dorks') });
+
+  const triggerScan = useMutation({
+    mutationFn: () => apiFetch('/api/scan/trigger', {
+      method: 'POST',
+      body: JSON.stringify({
+        scanType: 'manual',
+        scopeMode: 'restricted',
+        customQuery: useCustomQuery ? customQuery : undefined,
+      }),
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['scans'] });
+      setScanDialogOpen(false);
+      setCustomQuery('');
+      setUseCustomQuery(false);
+      toast.success('Scan started! Check Live Feed for results.');
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold tracking-tight">Discovery Layer</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Source providers, dork templates, and scan execution pipeline.
-          {/* ================================================================================
-              SCOPE BOUNDARY: All scans below run in RESTRICTED mode by default.
-              Only repos/orgs in the scope allowlist are scanned.
-              The "public_discovery" module is opt-in and clearly labeled.
-              ================================================================================ */}
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Discovery Layer</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Source providers, dork templates, and scan execution pipeline.
+          </p>
+        </div>
+        <Button size="sm" className="text-xs" onClick={() => setScanDialogOpen(true)}>
+          <Zap className="w-3.5 h-3.5 mr-1.5" /> Start Scan
+        </Button>
       </div>
 
       {/* Source Providers */}
@@ -94,7 +127,6 @@ export function DiscoveryView() {
                     <span className="text-muted-foreground">Fork Scanning</span>
                     <span className={config.scanForks ? 'text-primary' : 'text-muted-foreground'}>{config.scanForks ? 'Enabled' : 'Disabled'}</span>
                   </div>
-                  {/* Token Pool Status */}
                   <div>
                     <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">Token Pool</p>
                     <div className="space-y-1">
@@ -113,6 +145,13 @@ export function DiscoveryView() {
               </Card>
             );
           })}
+          {(!providers || providers.length === 0) && (
+            <Card>
+              <CardContent className="p-6 text-center text-muted-foreground text-sm">
+                No providers configured. Add a GitHub token in Settings first.
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
 
@@ -200,7 +239,7 @@ export function DiscoveryView() {
                         </td>
                         <td className="p-3">
                           {scan.scopeMode === 'public_discovery' ? (
-                            <Badge variant="outline" className="text-[10px] h-5 border-[oklch(0.75_0.18_55)]/50 text-[oklch(0.85_0.15_55)]">PUBLIC (Opt-In)</Badge>
+                            <Badge variant="outline" className="text-[10px] h-5 border-[oklch(0.75_0.18_55)]/50 text-[oklch(0.75_0.18_55)]">PUBLIC (Opt-In)</Badge>
                           ) : (
                             <Badge variant="outline" className="text-[10px] h-5 border-primary/40 text-primary">RESTRICTED</Badge>
                           )}
@@ -227,12 +266,91 @@ export function DiscoveryView() {
                       </tr>
                     );
                   })}
+                  {(!scans || scans.length === 0) && (
+                    <tr>
+                      <td colSpan={6} className="p-6 text-center text-muted-foreground">
+                        No scans yet. Click &quot;Start Scan&quot; to begin.
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </ScrollArea>
           </CardContent>
         </Card>
       </div>
+
+      {/* Start Scan Dialog */}
+      <Dialog open={scanDialogOpen} onOpenChange={setScanDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Zap className="w-4 h-4" /> Start Scan
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="p-3 bg-primary/5 border border-primary/20 rounded-lg text-xs">
+              <p className="font-medium text-primary">How scanning works:</p>
+              <p className="text-muted-foreground mt-1">
+                SecretScout runs 12 GitHub Code Search queries (dorks) against your scope entries,
+                then checks each result with 20 regex detection rules to find leaked credentials.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-medium">Query Mode</label>
+              <Select value={useCustomQuery ? 'custom' : 'dorks'} onValueChange={v => setUseCustomQuery(v === 'custom')}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="dorks">Use built-in dork templates (recommended)</SelectItem>
+                  <SelectItem value="custom">Custom GitHub search query</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {useCustomQuery && (
+              <div className="space-y-2">
+                <label className="text-xs font-medium">Custom Query</label>
+                <input
+                  type="text"
+                  className="w-full px-3 py-2 bg-background border border-border rounded-md text-xs font-mono"
+                  placeholder='e.g. "myorg" filename:.env SECRET_KEY'
+                  value={customQuery}
+                  onChange={e => setCustomQuery(e.target.value)}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Use GitHub Code Search syntax. Your scope restrictions still apply.
+                </p>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="p-2 bg-muted/30 rounded-lg">
+                <p className="text-muted-foreground">Scan Type</p>
+                <p className="font-medium mt-0.5">Manual</p>
+              </div>
+              <div className="p-2 bg-muted/30 rounded-lg">
+                <p className="text-muted-foreground">Scope Mode</p>
+                <p className="font-medium mt-0.5">Restricted</p>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setScanDialogOpen(false)}>Cancel</Button>
+            <Button
+              size="sm"
+              disabled={triggerScan.isPending || (useCustomQuery && !customQuery)}
+              onClick={() => triggerScan.mutate()}
+            >
+              {triggerScan.isPending ? (
+                <><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Starting...</>
+              ) : (
+                <><Zap className="w-3 h-3 mr-1" /> Start Scan</>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

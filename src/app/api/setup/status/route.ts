@@ -1,11 +1,12 @@
 import { db } from '@/lib/db';
-import { NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { successResponse, getOrgFromRequest } from '@/lib/api-helpers';
 
-export async function GET() {
+export async function GET(_request: NextRequest) {
   try {
-    const org = await db.organization.findFirst();
+    const org = await getOrgFromRequest(_request);
     if (!org) {
-      return NextResponse.json({ ready: false, step: 'org', message: 'No organization found. Run seed script.' });
+      return successResponse({ ready: false, step: 'org', message: 'No organization found. Run seed script.' });
     }
 
     const scopeCount = await db.scopeEntry.count({ where: { organizationId: org.id, enabled: true } });
@@ -14,14 +15,14 @@ export async function GET() {
     });
 
     if (scopeCount === 0) {
-      return NextResponse.json({ ready: false, step: 'scope', message: 'Add scope entries (organizations/repos) in Settings', orgName: org.name });
+      return successResponse({ ready: false, step: 'scope', message: 'Add scope entries (organizations/repos) in Settings', orgName: org.name });
     }
 
     if (tokenCount === 0) {
-      return NextResponse.json({ ready: false, step: 'tokens', message: 'Add at least one GitHub token in Settings', orgName: org.name, scopeCount });
+      return successResponse({ ready: false, step: 'tokens', message: 'Add at least one GitHub token in Settings', orgName: org.name, scopeCount });
     }
 
-    return NextResponse.json({
+    return successResponse({
       ready: true,
       step: 'ready',
       message: 'Ready to scan',
@@ -30,6 +31,6 @@ export async function GET() {
       tokenCount,
     });
   } catch (e) {
-    return NextResponse.json({ ready: false, step: 'error', message: String(e) });
+    return successResponse({ ready: false, step: 'error', message: String(e) });
   }
 }

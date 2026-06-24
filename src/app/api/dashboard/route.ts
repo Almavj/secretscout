@@ -1,10 +1,11 @@
 import { db } from '@/lib/db';
-import { NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { successResponse, errorResponse, getOrgFromRequest } from '@/lib/api-helpers';
 
-export async function GET() {
+export async function GET(_request: NextRequest) {
   try {
-    const org = await db.organization.findFirst();
-    if (!org) return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+    const org = await getOrgFromRequest(_request);
+    if (!org) return errorResponse('Organization not found. Run seed script.', 'ORG_NOT_FOUND', 404);
 
     const [totalFindings, openFindings, criticalOpen, highOpen, remediatedFindings, falsePositives, acceptedRisks, verifiedFindings, forkMatches, astFiltered] = await Promise.all([
       db.finding.count({ where: { organizationId: org.id } }),
@@ -19,7 +20,6 @@ export async function GET() {
       db.finding.count({ where: { organizationId: org.id, isAstFiltered: true } }),
     ]);
 
-    // MTTR calculation
     const remediatedWithMttr = await db.finding.findMany({
       where: { organizationId: org.id, status: 'remediated', mttrHours: { not: null } },
       select: { mttrHours: true },
@@ -28,14 +28,12 @@ export async function GET() {
       ? remediatedWithMttr.reduce((sum, f) => sum + (f.mttrHours || 0), 0) / remediatedWithMttr.length
       : 0;
 
-    // Findings by severity
     const severityBreakdown = await db.finding.groupBy({
       by: ['severity'],
       where: { organizationId: org.id },
       _count: true,
     });
 
-    // Findings by category (from rules)
     const categoryBreakdown = await db.finding.findMany({
       where: { organizationId: org.id, ruleId: { not: null } },
       include: { rule: { select: { category: true } } },
@@ -46,7 +44,6 @@ export async function GET() {
       categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
     }
 
-    // Findings by repo
     const repoBreakdown = await db.finding.groupBy({
       by: ['repoName'],
       where: { organizationId: org.id },
@@ -54,7 +51,6 @@ export async function GET() {
       orderBy: { _count: { id: 'desc' } },
     });
 
-    // Recent scan stats
     const recentScans = await db.scan.findMany({
       where: { organizationId: org.id },
       orderBy: { createdAt: 'desc' },
@@ -62,7 +58,6 @@ export async function GET() {
       select: { id: true, status: true, scanType: true, scopeMode: true, statsTotal: true, statsNew: true, statsDuplicate: true, startedAt: true, completedAt: true, createdAt: true },
     });
 
-    // Findings over time (last 7 days, grouped by day)
     const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
     const allFindings = await db.finding.findMany({
       where: { organizationId: org.id, discoveredAt: { gte: sevenDaysAgo } },
@@ -75,10 +70,9 @@ export async function GET() {
       findingsByDay[day][f.severity as keyof typeof findingsByDay[typeof day]] = (findingsByDay[day][f.severity as keyof typeof findingsByDay[typeof day]] || 0) + 1;
     }
 
-    // Active scans count
     const activeScans = await db.scan.count({ where: { organizationId: org.id, status: 'running' } });
 
-    return NextResponse.json({
+    return successResponse({
       summary: { totalFindings, openFindings, criticalOpen, highOpen, remediatedFindings, falsePositives, acceptedRisks, verifiedFindings, forkMatches, astFiltered, avgMttr: Math.round(avgMttr * 10) / 10, activeScans },
       severityBreakdown: severityBreakdown.map(s => ({ severity: s.severity, count: s._count })),
       categoryBreakdown: Object.entries(categoryCounts).map(([category, count]) => ({ category, count })),
@@ -87,6 +81,6 @@ export async function GET() {
       recentScans,
     });
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    return errorResponse(String(e), 'DASHBOARD_ERROR', 500);
   }
 }

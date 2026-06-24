@@ -1,18 +1,19 @@
 import { db } from '@/lib/db';
-import { NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { successResponse, errorResponse, getOrgFromRequest } from '@/lib/api-helpers';
 
-export async function GET() {
+export async function GET(_request: NextRequest) {
   try {
-    const org = await db.organization.findFirst();
-    if (!org) return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
+    const org = await getOrgFromRequest(_request);
+    if (!org) return errorResponse('Organization not found', 'ORG_NOT_FOUND', 404);
 
     const rules = await db.detectionRule.findMany({
       where: { organizationId: org.id },
       orderBy: { severity: 'asc' },
     });
 
-    return NextResponse.json(rules);
+    return successResponse(rules);
   } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+    return errorResponse(String(e), 'RULES_ERROR', 500);
   }
 }

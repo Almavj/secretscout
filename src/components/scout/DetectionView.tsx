@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { apiFetch } from '@/lib/api';
 import type { DetectionRule } from '@/lib/types';
 
 const SEVERITY_COLORS: Record<string, string> = {
@@ -18,7 +19,7 @@ const SEVERITY_COLORS: Record<string, string> = {
 };
 
 export function DetectionView() {
-  const { data: rules, isLoading } = useQuery<DetectionRule[]>({ queryKey: ['rules'], queryFn: () => fetch('/api/rules').then(r => r.json()) });
+  const { data: rules } = useQuery<DetectionRule[]>({ queryKey: ['rules'], queryFn: () => apiFetch('/api/rules') });
 
   const builtinRules = (rules || []).filter(r => r.isBuiltin);
   const customRules = (rules || []).filter(r => !r.isBuiltin);

@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 
 export async function GET() {
   try {
-    const org = await db.organization.findFirst({ where: { slug: 'acme-corp' } });
+    const org = await db.organization.findFirst();
     if (!org) return NextResponse.json({ error: 'Organization not found' }, { status: 404 });
 
     const scans = await db.scan.findMany({

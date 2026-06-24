@@ -133,6 +133,7 @@ export function FeedView() {
   // WebSocket connection
   useEffect(() => {
     const socket = io('/?XTransformPort=3004', {
+      path: '/ws',
       transports: ['websocket', 'polling'],
       forceNew: true,
       reconnection: true,

@@ -3,16 +3,18 @@
 import { useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle, ShieldAlert, CheckCircle2, Clock, Activity, GitFork,
-  Brain, Eye, Zap, TrendingDown, BarChart3
+  Brain, Eye, Settings, Telescope, BarChart3
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area,
   PieChart, Pie, Cell
 } from 'recharts';
 import type { DashboardStats } from '@/lib/types';
+import { useAppStore } from '@/lib/store';
 
 const SEVERITY_COLORS: Record<string, string> = {
   critical: 'oklch(0.65 0.25 25)',
@@ -28,7 +30,19 @@ const SEVERITY_BG: Record<string, string> = {
   low: 'bg-[oklch(0.55_0.08_260)]/15 text-[oklch(0.65_0.08_260)] border-[oklch(0.55_0.08_260)]/30',
 };
 
+const TOOLTIP_STYLE = {
+  contentStyle: { background: 'oklch(0.16 0.006 260)', border: '1px solid oklch(0.28 0.008 260)', borderRadius: 8, fontSize: 12 },
+  labelStyle: { color: 'oklch(0.88 0 260)' },
+};
+
 export function DashboardView() {
+  const { setCurrentView } = useAppStore();
+
+  const { data: setupStatus } = useQuery<{ ready: boolean; orgName?: string }>({
+    queryKey: ['setup-status'],
+    queryFn: () => fetch('/api/setup/status').then(r => r.json()),
+  });
+
   const { data, isLoading } = useQuery<DashboardStats>({
     queryKey: ['dashboard'],
     queryFn: () => fetch('/api/dashboard').then(r => r.json()),
@@ -38,6 +52,44 @@ export function DashboardView() {
   if (isLoading) return <DashboardSkeleton />;
 
   const s = data!.summary;
+
+  // Onboarding state: no findings, no scans
+  const isEmpty = s.totalFindings === 0 && (!data!.recentScans || data!.recentScans.length === 0);
+
+  if (isEmpty) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight">Risk Dashboard</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            Organization-wide credential exposure overview
+            {setupStatus?.orgName ? <> for <span className="text-primary font-medium">{setupStatus.orgName}</span></> : null}
+          </p>
+        </div>
+
+        <Card className="max-w-lg mx-auto mt-12">
+          <CardContent className="p-8 text-center space-y-4">
+            <div className="w-16 h-16 rounded-2xl bg-[oklch(0.65_0.25_25)]/10 flex items-center justify-center mx-auto">
+              <ShieldAlert className="w-8 h-8 text-[oklch(0.75_0.22_25)]" />
+            </div>
+            <h3 className="text-lg font-semibold">No scan data yet</h3>
+            <p className="text-sm text-muted-foreground">
+              Start by configuring your GitHub tokens and scope entries in Settings, then trigger your first scan from the Discovery tab.
+            </p>
+            <div className="flex gap-3 justify-center pt-2">
+              <Button size="sm" className="text-xs" onClick={() => setCurrentView('settings')}>
+                <Settings className="w-3.5 h-3.5 mr-1.5" /> Go to Settings
+              </Button>
+              <Button variant="outline" size="sm" className="text-xs" onClick={() => setCurrentView('discovery')}>
+                <Telescope className="w-3.5 h-3.5 mr-1.5" /> Go to Discovery
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   const metrics = [
     { label: 'Open Findings', value: s.openFindings, icon: AlertTriangle, color: 'text-[oklch(0.75_0.18_55)]', bg: 'bg-[oklch(0.75_0.18_55)]/10' },
     { label: 'Critical & Live', value: s.criticalOpen, icon: ShieldAlert, color: 'text-[oklch(0.65_0.25_25)]', bg: 'bg-[oklch(0.65_0.25_25)]/10', glow: true },
@@ -46,25 +98,24 @@ export function DashboardView() {
     { label: 'Active Scans', value: s.activeScans, icon: Activity, color: 'text-primary', bg: 'bg-primary/10' },
     { label: 'Fork Leaks', value: s.forkMatches, icon: GitFork, color: 'text-[oklch(0.75_0.18_55)]', bg: 'bg-[oklch(0.75_0.18_55)]/10' },
     { label: 'AST-Filtered', value: s.astFiltered, icon: Brain, color: 'text-[oklch(0.65_0.20_280)]', bg: 'bg-[oklch(0.65_0.20_280)]/10' },
-    { label: 'Remediated', value: s.remediatedFindings, icon: TrendingDown, color: 'text-primary', bg: 'bg-primary/10' },
+    { label: 'Remediated', value: s.remediatedFindings, icon: Activity, color: 'text-primary', bg: 'bg-primary/10' },
   ];
 
-  const recentScans = data!.recentScans;
-  const findingsTrend = data!.findingsByDay;
-  const pieData = data!.severityBreakdown.map(d => ({ ...d, fill: SEVERITY_COLORS[d.severity] || '#666' }));
-  const categoryData = data!.categoryBreakdown;
+  const recentScans = data!.recentScans || [];
+  const findingsTrend = data!.findingsByDay || [];
+  const pieData = (data!.severityBreakdown || []).filter(d => d.count > 0).map(d => ({ ...d, fill: SEVERITY_COLORS[d.severity] || '#666' }));
+  const categoryData = data!.categoryBreakdown || [];
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div>
         <h2 className="text-2xl font-bold tracking-tight">Risk Dashboard</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Organization-wide credential exposure overview for <span className="text-primary font-medium">Acme Corp</span>
+          Organization-wide credential exposure overview
+          {setupStatus?.orgName ? <> for <span className="text-primary font-medium">{setupStatus.orgName}</span></> : null}
         </p>
       </div>
 
-      {/* Metric Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {metrics.map(m => (
           <Card key={m.label} className={m.glow ? 'glow-critical' : ''}>
@@ -74,7 +125,7 @@ export function DashboardView() {
                   <m.icon className={`w-4.5 h-4.5 ${m.color}`} />
                 </div>
                 <div className="text-right">
-                  <p className="text-2xl font-bold font-mono">{m.isFloat ? m.value.toFixed(1) : m.value}</p>
+                  <p className="text-2xl font-bold font-mono">{m.isFloat ? (m.value as number).toFixed(1) : m.value}</p>
                 </div>
               </div>
               <p className="text-xs text-muted-foreground mt-2">{m.label}</p>
@@ -83,14 +134,11 @@ export function DashboardView() {
         ))}
       </div>
 
-      {/* Charts Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Findings Trend */}
         <Card className="lg:col-span-2">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 text-primary" />
-              Findings Trend (7 Days)
+              <BarChart3 className="w-4 h-4 text-primary" /> Findings Trend (7 Days)
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -107,10 +155,7 @@ export function DashboardView() {
                   </defs>
                   <XAxis dataKey="date" tick={{ fill: 'oklch(0.5 0 260)', fontSize: 11 }} tickLine={false} axisLine={false} />
                   <YAxis tick={{ fill: 'oklch(0.5 0 260)', fontSize: 11 }} tickLine={false} axisLine={false} />
-                  <Tooltip
-                    contentStyle={{ background: 'oklch(0.16 0.006 260)', border: '1px solid oklch(0.28 0.008 260)', borderRadius: 8, fontSize: 12 }}
-                    labelStyle={{ color: 'oklch(0.88 0 260)' }}
-                  />
+                  <Tooltip {...TOOLTIP_STYLE} />
                   <Area type="monotone" dataKey="critical" stackId="1" stroke={SEVERITY_COLORS.critical} fill={`url(#grad-critical)`} strokeWidth={2} />
                   <Area type="monotone" dataKey="high" stackId="1" stroke={SEVERITY_COLORS.high} fill={`url(#grad-high)`} strokeWidth={2} />
                   <Area type="monotone" dataKey="medium" stackId="1" stroke={SEVERITY_COLORS.medium} fill={`url(#grad-medium)`} strokeWidth={1.5} />
@@ -123,37 +168,38 @@ export function DashboardView() {
           </CardContent>
         </Card>
 
-        {/* Severity Pie */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">Severity Breakdown</CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={180}>
-              <PieChart>
-                <Pie data={pieData} cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={3} dataKey="count" strokeWidth={0}>
-                  {pieData.map((entry, i) => (
-                    <Cell key={i} fill={entry.fill} />
+            {pieData.length > 0 ? (
+              <>
+                <ResponsiveContainer width="100%" height={180}>
+                  <PieChart>
+                    <Pie data={pieData} cx="50%" cy="50%" innerRadius={45} outerRadius={70} paddingAngle={3} dataKey="count" strokeWidth={0}>
+                      {pieData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+                    </Pie>
+                    <Tooltip {...TOOLTIP_STYLE} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="flex flex-wrap gap-2 mt-2 justify-center">
+                  {pieData.map(d => (
+                    <div key={d.severity} className="flex items-center gap-1.5">
+                      <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: SEVERITY_COLORS[d.severity] }} />
+                      <span className="text-[11px] text-muted-foreground capitalize">{d.severity} ({d.count})</span>
+                    </div>
                   ))}
-                </Pie>
-                <Tooltip contentStyle={{ background: 'oklch(0.16 0.006 260)', border: '1px solid oklch(0.28 0.008 260)', borderRadius: 8, fontSize: 12 }} />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="flex flex-wrap gap-2 mt-2 justify-center">
-              {pieData.map(d => (
-                <div key={d.severity} className="flex items-center gap-1.5">
-                  <div className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: SEVERITY_COLORS[d.severity] }} />
-                  <span className="text-[11px] text-muted-foreground capitalize">{d.severity} ({d.count})</span>
                 </div>
-              ))}
-            </div>
+              </>
+            ) : (
+              <div className="h-[220px] flex items-center justify-center text-muted-foreground text-sm">No data yet</div>
+            )}
           </CardContent>
         </Card>
       </div>
 
-      {/* Bottom Row: Categories + Scans */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Category Breakdown */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">Findings by Category</CardTitle>
@@ -164,45 +210,46 @@ export function DashboardView() {
                 <BarChart data={categoryData} layout="vertical" margin={{ left: 10, right: 10, top: 0, bottom: 0 }}>
                   <XAxis type="number" tick={{ fill: 'oklch(0.5 0 260)', fontSize: 11 }} tickLine={false} axisLine={false} />
                   <YAxis type="category" dataKey="category" tick={{ fill: 'oklch(0.7 0 260)', fontSize: 11 }} tickLine={false} axisLine={false} width={90} />
-                  <Tooltip contentStyle={{ background: 'oklch(0.16 0.006 260)', border: '1px solid oklch(0.28 0.008 260)', borderRadius: 8, fontSize: 12 }} />
+                  <Tooltip {...TOOLTIP_STYLE} />
                   <Bar dataKey="count" fill="oklch(0.72 0.19 163)" radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="h-[200px] flex items-center justify-center text-muted-foreground text-sm">No data</div>
+              <div className="h-[200px] flex items-center justify-center text-muted-foreground text-sm">No data yet</div>
             )}
           </CardContent>
         </Card>
 
-        {/* Recent Scans */}
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium">Recent Scans</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
-              {recentScans.map(scan => (
-                <div key={scan.id} className="flex items-center gap-3 p-2 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
-                  <div className={`w-2 h-2 rounded-full shrink-0 ${scan.status === 'running' ? 'bg-primary animate-pulse-live' : scan.status === 'completed' ? 'bg-primary' : scan.status === 'failed' ? 'bg-destructive' : 'bg-muted-foreground'}`} />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium truncate">{scan.scanType.replace(/_/g, ' ')}</span>
-                      {scan.scopeMode === 'public_discovery' && (
-                        <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-[oklch(0.75_0.18_55)]/50 text-[oklch(0.75_0.18_55)] h-4">PUBLIC</Badge>
-                      )}
+            {recentScans.length > 0 ? (
+              <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+                {recentScans.map(scan => (
+                  <div key={scan.id} className="flex items-center gap-3 p-2 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
+                    <div className={`w-2 h-2 rounded-full shrink-0 ${scan.status === 'running' ? 'bg-primary animate-pulse-live' : scan.status === 'completed' ? 'bg-primary' : scan.status === 'failed' ? 'bg-destructive' : 'bg-muted-foreground'}`} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-medium truncate">{scan.scanType.replace(/_/g, ' ')}</span>
+                        {scan.scopeMode === 'public_discovery' && (
+                          <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-[oklch(0.75_0.18_55)]/50 text-[oklch(0.75_0.18_55)] h-4">PUBLIC</Badge>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground">
+                        {scan.status === 'running' ? `Scanning... ${scan.statsTotal} checked` :
+                         scan.status === 'completed' ? `${scan.statsNew} new / ${scan.statsTotal} total (${scan.statsDuplicate} dup)` :
+                         scan.status === 'failed' ? (scan as any).errorMessage || 'Failed' : 'Queued'}
+                      </p>
                     </div>
-                    <p className="text-[10px] text-muted-foreground">
-                      {scan.status === 'running' ? `Scanning... ${scan.statsTotal} checked` :
-                       scan.status === 'completed' ? `${scan.statsNew} new / ${scan.statsTotal} total (${scan.statsDuplicate} dup)` :
-                       scan.status === 'failed' ? 'Failed' : 'Queued'}
-                    </p>
+                    <span className="text-[10px] text-muted-foreground shrink-0">{new Date(scan.createdAt).toLocaleDateString()}</span>
                   </div>
-                  <span className="text-[10px] text-muted-foreground shrink-0">
-                    {new Date(scan.createdAt).toLocaleDateString()}
-                  </span>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="h-[200px] flex items-center justify-center text-muted-foreground text-sm">No scans yet</div>
+            )}
           </CardContent>
         </Card>
       </div>

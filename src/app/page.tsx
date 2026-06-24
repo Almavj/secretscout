@@ -64,7 +64,7 @@ function AppShell() {
         {/* Footer */}
         <footer className="shrink-0 border-t border-border px-4 py-2.5 flex items-center justify-between text-[10px] text-muted-foreground">
           <span>SecretScout Pro v1.0.0 — Production-grade credential exposure detection</span>
-          <span className="hidden sm:inline">Scope mode: RESTRICTED (allowlist only) &middot; Acme Corp</span>
+          <span className="hidden sm:inline">Scope mode: RESTRICTED (allowlist only)</span>
         </footer>
       </main>
     </div>
